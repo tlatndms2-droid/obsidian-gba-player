@@ -19,7 +19,7 @@
 
         window.addEventListener("message", (event) => {
           const payload = event.data;
-          if (started || !payload || payload.type !== "gba:load-rom" || !(payload.bytes instanceof ArrayBuffer)) return;
+          if (started || !payload || payload.type !== "gba:load-rom" || !(payload.bytes instanceof ArrayBuffer) || typeof payload.loaderUrl !== "string" || typeof payload.dataUrl !== "string") return;
 
           started = true;
           romUrl = URL.createObjectURL(new Blob([payload.bytes], { type: "application/octet-stream" }));
@@ -27,11 +27,11 @@
           window.EJS_core = "gba";
           window.EJS_gameUrl = romUrl;
           window.EJS_gameName = payload.name;
-          window.EJS_pathtodata = "./data/";
+          window.EJS_pathtodata = payload.dataUrl;
           window.EJS_disableAutoLang = false;
 
           const loader = document.createElement("script");
-          loader.src = "./data/loader.js";
+          loader.src = payload.loaderUrl;
           loader.onload = () => window.parent.postMessage({ type: "gba:started" }, "*");
           loader.onerror = () => window.parent.postMessage({ type: "gba:error", message: "EmulatorJS 파일을 불러오지 못했습니다." }, "*");
           document.body.appendChild(loader);

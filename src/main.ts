@@ -78,6 +78,8 @@ export default class GbaPlayerPlugin extends Plugin {
 
 class GbaPlayerView extends ItemView {
   private readonly iframeUrl: string;
+  private readonly emulatorLoaderUrl: string;
+  private readonly emulatorDataUrl: string;
   private frame: HTMLIFrameElement | null = null;
   private selectedRom: SelectedRom | null = null;
   private selectedRomBytes: ArrayBuffer | null = null;
@@ -86,6 +88,8 @@ class GbaPlayerView extends ItemView {
   constructor(leaf: WorkspaceLeaf, private readonly plugin: GbaPlayerPlugin) {
     super(leaf);
     this.iframeUrl = plugin.getPluginAssetUrl("vendor/emulator/index.html");
+    this.emulatorLoaderUrl = plugin.getPluginAssetUrl("vendor/emulator/data/loader.js");
+    this.emulatorDataUrl = new URL(".", this.emulatorLoaderUrl).toString();
   }
 
   getViewType(): string {
@@ -220,7 +224,9 @@ class GbaPlayerView extends ItemView {
       this.frame.contentWindow?.postMessage({
         type: "gba:load-rom",
         name: this.selectedRom.name,
-        bytes: this.selectedRomBytes
+        bytes: this.selectedRomBytes,
+        loaderUrl: this.emulatorLoaderUrl,
+        dataUrl: this.emulatorDataUrl
       }, "*", [this.selectedRomBytes]);
       this.selectedRomBytes = null;
       return;
