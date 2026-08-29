@@ -8,13 +8,19 @@
 
 .gba-player-header {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 8px;
 }
 
 .gba-player-title-group {
+  flex: 1 1 100%;
   min-width: 0;
-  flex: 1;
+}
+
+.gba-player-header > button {
+  flex: 1 1 auto;
+  white-space: nowrap;
 }
 
 .gba-player-title {

@@ -1,4 +1,4 @@
-import { App, ItemView, Modal, Notice, Plugin, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { App, ItemView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { BUNDLED_EMULATOR_ASSETS } from "./generated-vendor";
@@ -8,11 +8,8 @@ const SUPPORTED_ROM_EXTENSIONS = new Set(["gb", "gbc", "gba"]);
 const SAVE_FOLDER = "GBA Saves";
 const DEFAULT_EMULATOR_VOLUME = 0.3;
 
-type EmulatorOptionValue = string | number | boolean;
-
 interface PluginSettings {
   volume: number;
-  options: Record<string, EmulatorOptionValue>;
 }
 
 interface SelectedRom {
@@ -24,7 +21,7 @@ interface SelectedRom {
 export default class GbaPlayerPlugin extends Plugin {
   private emulatorServer: Server | null = null;
   private emulatorServerUrl = "";
-  private emulatorSettings: PluginSettings = { volume: DEFAULT_EMULATOR_VOLUME, options: {} };
+  private emulatorSettings: PluginSettings = { volume: DEFAULT_EMULATOR_VOLUME };
 
   async onload(): Promise<void> {
     this.emulatorSettings = normalizePluginSettings(await this.loadData());
@@ -37,6 +34,7 @@ export default class GbaPlayerPlugin extends Plugin {
     }
 
     this.registerView(VIEW_TYPE_GBA_PLAYER, (leaf) => new GbaPlayerView(leaf, this));
+    this.addSettingTab(new GbaPlayerSettingTab(this.app, this));
 
     this.addRibbonIcon("gamepad-2", "GBA 플레이어 열기", () => void this.activateView());
     this.addCommand({
@@ -69,13 +67,29 @@ export default class GbaPlayerPlugin extends Plugin {
   }
 
   getEmulatorSettings(): PluginSettings {
-    return { volume: this.emulatorSettings.volume, options: { ...this.emulatorSettings.options } };
+    return { volume: this.emulatorSettings.volume };
   }
 
-  async updateEmulatorSettings(value: unknown): Promise<void> {
-    const next = normalizePluginSettings(value);
-    this.emulatorSettings = next;
-    await this.saveData(next);
+  async updateVolume(value: number): Promise<void> {
+    this.emulatorSettings = { volume: normalizeVolume(value) };
+    await this.saveData(this.emulatorSettings);
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GBA_PLAYER)) {
+      if (leaf.view instanceof GbaPlayerView) {
+        leaf.view.applyVolume(this.emulatorSettings.volume);
+      }
+    }
+  }
+
+  openPluginSettings(): void {
+    const settings = (this.app as App & {
+      setting?: { open: () => void; openTabById: (id: string) => void };
+    }).setting;
+    if (!settings) {
+      new Notice("Obsidian 설정 창을 열지 못했습니다.");
+      return;
+    }
+    settings.open();
+    settings.openTabById(this.manifest.id);
   }
 
   private async startEmulatorServer(): Promise<string> {
@@ -283,10 +297,12 @@ class GbaPlayerView extends ItemView {
     titleGroup.createDiv({ text: "GBA 플레이어", cls: "gba-player-title" });
     titleGroup.createDiv({ text: this.selectedRom.displayName, cls: "gba-player-rom-name" });
     titleGroup.createDiv({ text: `자동 저장: ${this.selectedRom.savePath}`, cls: "gba-player-save-location" });
-    const settingsButton = header.createEl("button", { text: "설정 열기" });
-    settingsButton.addEventListener("click", () => {
+    const pluginSettingsButton = header.createEl("button", { text: "플러그인 설정" });
+    pluginSettingsButton.addEventListener("click", () => this.plugin.openPluginSettings());
+    const menuButton = header.createEl("button", { text: "게임 메뉴" });
+    menuButton.addEventListener("click", () => {
       this.emulatorMenuVisible = !this.emulatorMenuVisible;
-      settingsButton.setText(this.emulatorMenuVisible ? "설정 닫기" : "설정 열기");
+      menuButton.setText(this.emulatorMenuVisible ? "게임 메뉴 닫기" : "게임 메뉴");
       this.frame?.contentWindow?.postMessage({ type: "gba:toggle-settings", visible: this.emulatorMenuVisible }, "*");
     });
     const changeButton = header.createEl("button", { text: "게임 변경" });
@@ -356,12 +372,6 @@ class GbaPlayerView extends ItemView {
       return;
     }
 
-    if (event.data.type === "gba:settings") {
-      void this.plugin.updateEmulatorSettings(event.data.settings)
-        .catch((error) => console.error("에뮬레이터 설정을 저장하지 못했습니다.", error));
-      return;
-    }
-
     if (event.data.type === "gba:error") {
       this.clearLoadingNoticeTimer();
       this.statusEl?.setText(`실행할 수 없습니다: ${event.data.message}`);
@@ -373,6 +383,10 @@ class GbaPlayerView extends ItemView {
       window.clearTimeout(this.loadingNoticeTimer);
       this.loadingNoticeTimer = null;
     }
+  }
+
+  applyVolume(volume: number): void {
+    this.frame?.contentWindow?.postMessage({ type: "gba:apply-volume", volume }, "*");
   }
 
   private startAutoSave(): void {
@@ -491,29 +505,48 @@ function sanitizeFileName(value: string): string {
 
 function normalizePluginSettings(value: unknown): PluginSettings {
   if (!value || typeof value !== "object") {
-    return { volume: DEFAULT_EMULATOR_VOLUME, options: {} };
+    return { volume: DEFAULT_EMULATOR_VOLUME };
   }
 
-  const candidate = value as { volume?: unknown; options?: unknown };
-  const volume = typeof candidate.volume === "number" && Number.isFinite(candidate.volume)
-    ? Math.min(1, Math.max(0, candidate.volume))
+  const candidate = value as { volume?: unknown };
+  return { volume: normalizeVolume(candidate.volume) };
+}
+
+function normalizeVolume(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(1, Math.max(0, value))
     : DEFAULT_EMULATOR_VOLUME;
-  const options: Record<string, EmulatorOptionValue> = {};
-  if (candidate.options && typeof candidate.options === "object") {
-    for (const [key, optionValue] of Object.entries(candidate.options)) {
-      if (typeof optionValue === "string" || typeof optionValue === "number" || typeof optionValue === "boolean") {
-        options[key] = optionValue;
-      }
-    }
+}
+
+class GbaPlayerSettingTab extends PluginSettingTab {
+  constructor(app: App, private readonly plugin: GbaPlayerPlugin) {
+    super(app, plugin);
   }
-  return { volume, options };
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl("h2", { text: "GBA 플레이어 설정" });
+    containerEl.createEl("p", { text: "여기에서 지정한 음량은 게임을 닫거나 Obsidian을 다시 열어도 유지됩니다." });
+
+    const currentVolume = this.plugin.getEmulatorSettings().volume;
+    new Setting(containerEl)
+      .setName("기본 음량")
+      .setDesc("게임 메뉴의 음량과 별개로, 플러그인이 항상 이 값으로 시작합니다.")
+      .addSlider((slider) => slider
+        .setLimits(0, 100, 1)
+        .setValue(Math.round(currentVolume * 100))
+        .setDynamicTooltip()
+        .onChange(async (value) => {
+          await this.plugin.updateVolume(value / 100);
+        }));
+  }
 }
 
 function isFrameMessage(value: unknown): value is {
-  type: "gba:ready" | "gba:started" | "gba:error" | "gba:save-data" | "gba:no-save" | "gba:settings";
+  type: "gba:ready" | "gba:started" | "gba:error" | "gba:save-data" | "gba:no-save";
   message?: string;
   bytes?: unknown;
-  settings?: unknown;
 } {
   return typeof value === "object" && value !== null && "type" in value && typeof (value as { type?: unknown }).type === "string";
 }

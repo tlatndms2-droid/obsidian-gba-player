@@ -10,7 +10,10 @@ Module._load = function loadWithObsidianStub(request, parent, isMain) {
       Modal: class {},
       Notice: class {},
       Plugin: class {},
+      PluginSettingTab: class {},
+      Setting: class {},
       TFile: class {},
+      TFolder: class {},
       WorkspaceLeaf: class {}
     };
   }
