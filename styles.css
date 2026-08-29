@@ -1,0 +1,100 @@
+.gba-player-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  padding: 12px;
+}
+
+.gba-player-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gba-player-title-group {
+  min-width: 0;
+  flex: 1;
+}
+
+.gba-player-title {
+  font-size: 1.05em;
+  font-weight: 700;
+}
+
+.gba-player-rom-name,
+.gba-player-rom-item-path,
+.gba-player-legal-note {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.82em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gba-player-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.gba-player-empty h3,
+.gba-player-empty p {
+  margin: 0;
+}
+
+.gba-player-empty p {
+  max-width: 280px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.gba-player-empty-icon {
+  font-size: 2.5em;
+}
+
+.gba-player-status {
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+
+.gba-player-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 360px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: #111;
+}
+
+.gba-player-rom-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.gba-player-rom-item {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  text-align: left;
+}
+
+.gba-player-rom-item:hover {
+  border-color: var(--interactive-accent);
+}
+
+.gba-player-rom-item-name {
+  font-weight: 600;
+}
+
+.gba-player-empty-list {
+  color: var(--text-muted);
+}

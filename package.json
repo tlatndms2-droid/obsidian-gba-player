@@ -1,0 +1,27 @@
+{
+  "name": "obsidian-gba-player",
+  "version": "0.1.0",
+  "description": "Run a locally selected GBA ROM in an Obsidian right sidebar using EmulatorJS and the mGBA core.",
+  "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tlatndms2-droid/obsidian-gba-player.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tlatndms2-droid/obsidian-gba-player/issues"
+  },
+  "homepage": "https://github.com/tlatndms2-droid/obsidian-gba-player#readme",
+  "scripts": {
+    "generate:vendor": "node scripts/generate-vendor.mjs",
+    "dev": "pnpm run generate:vendor && node esbuild.config.mjs",
+    "build": "pnpm run generate:vendor && node esbuild.config.mjs production",
+    "check": "pnpm run generate:vendor && tsc --noEmit"
+  },
+  "license": "GPL-3.0-or-later",
+  "devDependencies": {
+    "@types/node": "22.10.5",
+    "esbuild": "0.24.2",
+    "obsidian": "latest",
+    "typescript": "5.7.2"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "gba-player",
+  "name": "GBA Player",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Run your own GBA ROM files in an Obsidian right sidebar.",
+  "author": "tlatndms2-droid",
+  "authorUrl": "https://github.com/tlatndms2-droid",
+  "isDesktopOnly": true
+}

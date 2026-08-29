@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html, body, #game { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #111; }
+      #game { display: flex; align-items: center; justify-content: center; color: #bbb; font: 14px system-ui, sans-serif; }
+    </style>
+  </head>
+  <body>
+    <div id="game">ROM을 불러오는 중…</div>
+    <script>
+      (() => {
+        let started = false;
+        let romUrl = null;
+
+        window.parent.postMessage({ type: "gba:ready" }, "*");
+
+        window.addEventListener("message", (event) => {
+          const payload = event.data;
+          if (started || !payload || payload.type !== "gba:load-rom" || !(payload.bytes instanceof ArrayBuffer)) return;
+
+          started = true;
+          romUrl = URL.createObjectURL(new Blob([payload.bytes], { type: "application/octet-stream" }));
+          window.EJS_player = "#game";
+          window.EJS_core = "gba";
+          window.EJS_gameUrl = romUrl;
+          window.EJS_pathtodata = "./data/";
+          window.EJS_disableAutoLang = false;
+
+          const loader = document.createElement("script");
+          loader.src = "./data/loader.js";
+          loader.onload = () => window.parent.postMessage({ type: "gba:started" }, "*");
+          loader.onerror = () => window.parent.postMessage({ type: "gba:error", message: "EmulatorJS 파일을 불러오지 못했습니다." }, "*");
+          document.body.appendChild(loader);
+        });
+
+        window.addEventListener("beforeunload", () => { if (romUrl) URL.revokeObjectURL(romUrl); });
+      })();
+    </script>
+  </body>
+</html>
