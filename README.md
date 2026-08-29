@@ -1,14 +1,14 @@
 # Obsidian GBA Player
 
-Obsidian 오른쪽 사이드바에서 직접 보유한 GBA ROM을 실행하는 데스크톱 전용 플러그인입니다.
+Obsidian 오른쪽 사이드바에서 직접 보유한 Game Boy / Game Boy Color / Game Boy Advance ROM을 실행하는 데스크톱 전용 플러그인입니다.
 
 게임 실행은 새로 만든 에뮬레이터가 아니라, 포함된 **EmulatorJS 4.2.3 + mGBA 코어**를 사용합니다. ROM과 BIOS는 포함하지 않습니다.
 
 ## 현재 동작
 
 1. Obsidian 왼쪽 리본의 게임패드 버튼 또는 명령 팔레트에서 **GBA 플레이어 열기**를 누릅니다.
-2. 오른쪽 사이드바의 **ROM 불러오기**를 누릅니다.
-3. Vault 안에 넣어 둔 `.gba` 파일을 선택합니다.
+2. 오른쪽 사이드바의 **게임 불러오기**를 누릅니다.
+3. Vault 또는 PC의 다른 폴더에서 `.gb`, `.gbc`, `.gba` 파일을 선택합니다.
 4. 선택한 게임이 동일한 사이드바 안에서 실행됩니다.
 
 EmulatorJS가 제공하는 게임 메뉴에서 키, 화면 크기, 저장 상태 등의 에뮬레이터 기능을 사용합니다. 에뮬레이터 저장 데이터는 현재 Obsidian Vault 파일이 아니라 EmulatorJS의 로컬 저장소에 보관됩니다.
