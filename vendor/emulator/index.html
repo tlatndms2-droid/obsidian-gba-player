@@ -12,16 +12,43 @@
     <div id="game">ROM을 불러오는 중…</div>
     <script>
       (() => {
-        let started = false;
+        let romLoadingStarted = false;
+        let gameStarted = false;
+        let reportedError = false;
         let romUrl = null;
+
+        const reportError = (message) => {
+          if (reportedError) return;
+          reportedError = true;
+          window.parent.postMessage({ type: "gba:error", message }, "*");
+        };
+
+        const errorMessage = (reason) => {
+          if (reason instanceof Error && reason.message) return reason.message;
+          if (typeof reason === "string" && reason) return reason;
+          return "에뮬레이터 엔진을 시작하지 못했습니다.";
+        };
 
         window.parent.postMessage({ type: "gba:ready" }, "*");
 
+        window.addEventListener("error", (event) => {
+          if (gameStarted) return;
+          if (event.target instanceof HTMLScriptElement) {
+            reportError("에뮬레이터 구성 파일을 불러오지 못했습니다.");
+            return;
+          }
+          reportError(errorMessage(event.error || event.message));
+        }, true);
+
+        window.addEventListener("unhandledrejection", (event) => {
+          if (!gameStarted) reportError(errorMessage(event.reason));
+        });
+
         window.addEventListener("message", (event) => {
           const payload = event.data;
-          if (started || !payload || payload.type !== "gba:load-rom" || !(payload.bytes instanceof ArrayBuffer) || typeof payload.loaderUrl !== "string" || typeof payload.dataUrl !== "string") return;
+          if (romLoadingStarted || !payload || payload.type !== "gba:load-rom" || !(payload.bytes instanceof ArrayBuffer) || typeof payload.loaderUrl !== "string" || typeof payload.dataUrl !== "string") return;
 
-          started = true;
+          romLoadingStarted = true;
           romUrl = URL.createObjectURL(new Blob([payload.bytes], { type: "application/octet-stream" }));
           window.EJS_player = "#game";
           window.EJS_core = "gba";
@@ -29,11 +56,15 @@
           window.EJS_gameName = payload.name;
           window.EJS_pathtodata = payload.dataUrl;
           window.EJS_disableAutoLang = false;
+          window.EJS_startOnLoaded = true;
+          window.EJS_onGameStart = () => {
+            gameStarted = true;
+            window.parent.postMessage({ type: "gba:started" }, "*");
+          };
 
           const loader = document.createElement("script");
           loader.src = payload.loaderUrl;
-          loader.onload = () => window.parent.postMessage({ type: "gba:started" }, "*");
-          loader.onerror = () => window.parent.postMessage({ type: "gba:error", message: "EmulatorJS 파일을 불러오지 못했습니다." }, "*");
+          loader.onerror = () => reportError("EmulatorJS 파일을 불러오지 못했습니다.");
           document.body.appendChild(loader);
         });
 

@@ -126,6 +126,7 @@ class GbaPlayerView extends ItemView {
   private selectedRom: SelectedRom | null = null;
   private selectedRomBytes: ArrayBuffer | null = null;
   private statusEl: HTMLElement | null = null;
+  private loadingNoticeTimer: number | null = null;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: GbaPlayerPlugin) {
     super(leaf);
@@ -152,6 +153,7 @@ class GbaPlayerView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.clearLoadingNoticeTimer();
     this.frame?.remove();
     this.frame = null;
     this.selectedRomBytes = null;
@@ -243,6 +245,7 @@ class GbaPlayerView extends ItemView {
     const changeButton = header.createEl("button", { text: "게임 변경" });
     changeButton.addEventListener("click", () => this.openRomSourcePicker());
 
+    this.clearLoadingNoticeTimer();
     this.statusEl = contentEl.createDiv({ text: "에뮬레이터를 준비하는 중…", cls: "gba-player-status" });
 
     this.frame = contentEl.createEl("iframe", {
@@ -254,6 +257,10 @@ class GbaPlayerView extends ItemView {
       }
     });
     this.frame.src = this.iframeUrl;
+
+    this.loadingNoticeTimer = window.setTimeout(() => {
+      this.statusEl?.setText("mGBA 엔진을 계속 준비하는 중입니다…");
+    }, 15_000);
   }
 
   private handleFrameMessage(event: MessageEvent<unknown>): void {
@@ -275,13 +282,22 @@ class GbaPlayerView extends ItemView {
     }
 
     if (event.data.type === "gba:started") {
+      this.clearLoadingNoticeTimer();
       this.statusEl?.remove();
       this.statusEl = null;
       return;
     }
 
     if (event.data.type === "gba:error") {
+      this.clearLoadingNoticeTimer();
       this.statusEl?.setText(`실행할 수 없습니다: ${event.data.message}`);
+    }
+  }
+
+  private clearLoadingNoticeTimer(): void {
+    if (this.loadingNoticeTimer !== null) {
+      window.clearTimeout(this.loadingNoticeTimer);
+      this.loadingNoticeTimer = null;
     }
   }
 }
