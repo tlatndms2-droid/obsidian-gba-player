@@ -1,6 +1,6 @@
 {
   "name": "obsidian-gba-player",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Run a locally selected GBA ROM in an Obsidian right sidebar using EmulatorJS and the mGBA core.",
   "main": "main.js",
   "repository": {

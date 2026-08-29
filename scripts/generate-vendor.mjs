@@ -9,6 +9,7 @@ const vendorFiles = [
   "vendor/emulator/data/loader.js",
   "vendor/emulator/data/emulator.min.js",
   "vendor/emulator/data/emulator.min.css",
+  "vendor/emulator/data/compression/extract7z.js",
   "vendor/emulator/data/version.json",
   "vendor/emulator/data/cores/cores.json",
   "vendor/emulator/data/cores/mgba-legacy-wasm.data",

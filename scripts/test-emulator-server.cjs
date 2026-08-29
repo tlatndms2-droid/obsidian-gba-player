@@ -30,6 +30,7 @@ async function run() {
     const expected = [
       ["/index.html", "ROM을 불러오는 중"],
       ["/data/loader.js", "EJS_player"],
+      ["/data/compression/extract7z.js", "Module"],
       ["/data/cores/mgba-wasm.data", null]
     ];
 
