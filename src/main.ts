@@ -1,7 +1,6 @@
-import { App, ItemView, Modal, Notice, Plugin, TFile, WorkspaceLeaf, normalizePath } from "obsidian";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { BUNDLED_EMULATOR_ASSETS, BUNDLED_EMULATOR_ASSET_VERSION } from "./generated-vendor";
+import { App, ItemView, Modal, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { createServer, type Server } from "node:http";
+import { BUNDLED_EMULATOR_ASSETS } from "./generated-vendor";
 
 const VIEW_TYPE_GBA_PLAYER = "gba-player-view";
 const SUPPORTED_ROM_EXTENSIONS = new Set(["gb", "gbc", "gba"]);
@@ -12,12 +11,15 @@ interface SelectedRom {
 }
 
 export default class GbaPlayerPlugin extends Plugin {
+  private emulatorServer: Server | null = null;
+  private emulatorServerUrl = "";
+
   async onload(): Promise<void> {
     try {
-      this.installBundledEmulatorAssets();
+      this.emulatorServerUrl = await this.startEmulatorServer();
     } catch (error) {
-      console.error("GBA 실행 파일을 준비하지 못했습니다.", error);
-      new Notice("GBA 실행 파일을 준비하지 못했습니다. 플러그인을 다시 설치해 주세요.");
+      console.error("GBA 실행 서버를 준비하지 못했습니다.", error);
+      new Notice("GBA 실행 환경을 준비하지 못했습니다. 플러그인을 다시 설치해 주세요.");
       return;
     }
 
@@ -31,6 +33,12 @@ export default class GbaPlayerPlugin extends Plugin {
     });
   }
 
+  onunload(): void {
+    this.emulatorServer?.close();
+    this.emulatorServer = null;
+    this.emulatorServerUrl = "";
+  }
+
   async activateView(): Promise<void> {
     const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_GBA_PLAYER)[0];
     const leaf = existingLeaf ?? this.app.workspace.getRightLeaf(false);
@@ -39,40 +47,74 @@ export default class GbaPlayerPlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
-  getPluginAssetUrl(relativePath: string): string {
-    if (!this.manifest.dir) {
-      throw new Error("플러그인 폴더를 찾을 수 없습니다.");
+  getEmulatorUrl(relativePath: string): string {
+    if (!this.emulatorServerUrl) {
+      throw new Error("GBA 실행 서버가 준비되지 않았습니다.");
     }
 
-    const assetPath = normalizePath(`${this.manifest.dir}/${relativePath}`);
-    return this.app.vault.adapter.getResourcePath(assetPath);
+    return new URL(relativePath, `${this.emulatorServerUrl}/`).toString();
   }
 
-  private installBundledEmulatorAssets(): void {
-    if (!this.manifest.dir) {
-      throw new Error("플러그인 폴더를 찾을 수 없습니다.");
+  private async startEmulatorServer(): Promise<string> {
+    const server = createServer((request, response) => {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        response.writeHead(405);
+        response.end();
+        return;
+      }
+
+      let requestedPath: string;
+      try {
+        requestedPath = decodeURIComponent(new URL(request.url ?? "/", "http://127.0.0.1").pathname);
+      } catch {
+        response.writeHead(400);
+        response.end();
+        return;
+      }
+
+      const cleanPath = requestedPath === "/" ? "index.html" : requestedPath.replace(/^\/+/, "");
+      if (cleanPath.includes("..")) {
+        response.writeHead(403);
+        response.end();
+        return;
+      }
+
+      const assetPath = `vendor/emulator/${cleanPath}`;
+      const base64 = BUNDLED_EMULATOR_ASSETS[assetPath];
+      if (!base64) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+
+      response.writeHead(200, {
+        "Content-Type": getContentType(assetPath),
+        "Cache-Control": "no-store",
+        "Cross-Origin-Resource-Policy": "same-origin"
+      });
+      if (request.method === "GET") {
+        response.end(Buffer.from(base64, "base64"));
+      } else {
+        response.end();
+      }
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.removeListener("error", reject);
+        resolve();
+      });
+    });
+
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("GBA 실행 서버 주소를 찾을 수 없습니다.");
     }
 
-    const adapter = this.app.vault.adapter as unknown as { getBasePath?: () => string };
-    const vaultPath = adapter.getBasePath?.();
-    if (!vaultPath) {
-      throw new Error("데스크톱 Vault 경로를 찾을 수 없습니다.");
-    }
-
-    const pluginPath = join(vaultPath, this.manifest.dir);
-    const markerPath = join(pluginPath, "vendor", "emulator", ".bundle-version");
-    const filesArePresent = Object.keys(BUNDLED_EMULATOR_ASSETS).every((relativePath) => existsSync(join(pluginPath, relativePath)));
-    if (filesArePresent && existsSync(markerPath) && readFileSync(markerPath, "utf8") === BUNDLED_EMULATOR_ASSET_VERSION) {
-      return;
-    }
-
-    for (const [relativePath, base64] of Object.entries(BUNDLED_EMULATOR_ASSETS)) {
-      const targetPath = join(pluginPath, relativePath);
-      mkdirSync(dirname(targetPath), { recursive: true });
-      writeFileSync(targetPath, Buffer.from(base64, "base64"));
-    }
-    mkdirSync(dirname(markerPath), { recursive: true });
-    writeFileSync(markerPath, BUNDLED_EMULATOR_ASSET_VERSION, "utf8");
+    this.emulatorServer = server;
+    return `http://127.0.0.1:${address.port}`;
   }
 }
 
@@ -87,9 +129,9 @@ class GbaPlayerView extends ItemView {
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: GbaPlayerPlugin) {
     super(leaf);
-    this.iframeUrl = plugin.getPluginAssetUrl("vendor/emulator/index.html");
-    this.emulatorLoaderUrl = plugin.getPluginAssetUrl("vendor/emulator/data/loader.js");
-    this.emulatorDataUrl = new URL(".", this.emulatorLoaderUrl).toString();
+    this.iframeUrl = plugin.getEmulatorUrl("index.html");
+    this.emulatorLoaderUrl = plugin.getEmulatorUrl("data/loader.js");
+    this.emulatorDataUrl = plugin.getEmulatorUrl("data/");
   }
 
   getViewType(): string {
@@ -305,4 +347,12 @@ class RomSourceModal extends Modal {
 
 function isFrameMessage(value: unknown): value is { type: "gba:ready" | "gba:started" | "gba:error"; message?: string } {
   return typeof value === "object" && value !== null && "type" in value && typeof (value as { type?: unknown }).type === "string";
+}
+
+function getContentType(assetPath: string): string {
+  if (assetPath.endsWith(".html")) return "text/html; charset=utf-8";
+  if (assetPath.endsWith(".js")) return "text/javascript; charset=utf-8";
+  if (assetPath.endsWith(".css")) return "text/css; charset=utf-8";
+  if (assetPath.endsWith(".json")) return "application/json; charset=utf-8";
+  return "application/octet-stream";
 }
