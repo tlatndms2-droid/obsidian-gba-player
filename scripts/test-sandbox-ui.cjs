@@ -120,7 +120,9 @@ async function run() {
       if (!directLoad.loaded) throw new Error(`Sandbox plugin did not load. ${JSON.stringify(loaded)} ${JSON.stringify(directLoad)}`);
       loaded = directLoad;
     }
-    assert.equal(loaded.version, "0.3.2");
+    assert.equal(loaded.version, "0.3.3");
+
+    await evaluate(client, `app.plugins.getPlugin("gba-player").updateVolume(0.17)`);
 
     await evaluate(client, `app.plugins.getPlugin("gba-player").openPluginSettings()`);
     settingsClient = await openSettingsClient();
@@ -185,6 +187,14 @@ async function run() {
     const gameSessionId = (await client.command("Target.attachToTarget", { targetId: gameTarget.targetId, flatten: true })).sessionId;
     console.log("Verified: emulator iframe was created.");
 
+    const bootVolume = await waitFor(
+      async () => evaluate(client, `window.EJS_volume === 0`, undefined, gameSessionId),
+      "the emulator boot volume to be muted",
+      5000
+    );
+    assert.equal(bootVolume, true, "The emulator must boot muted before applying the saved plugin volume");
+    console.log("Verified: emulator boot is muted before game audio is ready.");
+
     const gameStarted = await waitFor(
       async () => evaluate(client, `Boolean(window.EJS_emulator?.gameManager && window.EJS_emulator?.volume === 0.23)`, undefined, gameSessionId),
       "the game to start with the persisted volume",
@@ -192,6 +202,20 @@ async function run() {
     );
     assert.equal(gameStarted, true);
     console.log("Verified: game started with the persisted volume.");
+
+    await evaluate(client, `(() => {
+      const emulator = window.EJS_emulator;
+      emulator.volume = 1;
+      emulator.muted = false;
+      emulator.setVolume(1);
+    })()`, undefined, gameSessionId);
+    const reappliedVolume = await waitFor(
+      async () => evaluate(client, `window.EJS_emulator?.volume === 0.23`, undefined, gameSessionId),
+      "the saved volume to be reapplied after EmulatorJS finishes creating audio sources",
+      2000
+    );
+    assert.equal(reappliedVolume, true);
+    console.log("Verified: saved volume is reapplied after EmulatorJS startup.");
 
     await evaluate(client, `(() => {
       const button = [...document.querySelectorAll("button")].find((element) => element.textContent?.trim() === "게임 메뉴");

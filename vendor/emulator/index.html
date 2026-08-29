@@ -59,7 +59,8 @@
             return;
           }
           if (payload && payload.type === "gba:apply-volume") {
-            applyVolume(payload.volume);
+            configuredVolume = normalizeVolume(payload.volume);
+            applyVolume(configuredVolume);
             return;
           }
           if (romLoadingStarted || !payload || payload.type !== "gba:load-rom" || !(payload.bytes instanceof ArrayBuffer) || typeof payload.loaderUrl !== "string" || typeof payload.dataUrl !== "string") return;
@@ -75,13 +76,17 @@
           window.EJS_gameName = payload.name;
           window.EJS_pathtodata = payload.dataUrl;
           window.EJS_disableAutoLang = false;
-          window.EJS_volume = configuredVolume;
+          // EmulatorJS may restore its own previous volume while its audio
+          // sources are still being created. Always boot muted, then apply the
+          // plugin's persisted volume only after the engine has started.
+          window.EJS_volume = 0;
           window.EJS_startOnLoaded = true;
           window.EJS_onGameStart = () => {
             restoreInitialSave();
-            applyVolume(configuredVolume);
-            hideRestartButton();
             gameStarted = true;
+            applyVolume(0);
+            applyConfiguredVolumeAfterStart();
+            hideRestartButton();
             window.parent.postMessage({ type: "gba:started" }, "*");
           };
 
@@ -149,6 +154,16 @@
           emulator.volume = volume;
           emulator.muted = volume === 0;
           emulator.setVolume(volume);
+        }
+
+        function applyConfiguredVolumeAfterStart() {
+          // The first call covers the normal case. The follow-up calls cover
+          // audio sources that EmulatorJS creates just after its start event.
+          for (const delay of [0, 250, 1000]) {
+            window.setTimeout(() => {
+              if (gameStarted) applyVolume(configuredVolume);
+            }, delay);
+          }
         }
 
         function hideRestartButton() {
