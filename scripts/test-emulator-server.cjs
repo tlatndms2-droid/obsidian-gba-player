@@ -28,7 +28,7 @@ async function run() {
   const baseUrl = await plugin.startEmulatorServer();
   try {
     const expected = [
-      ["/index.html", "ROM을 불러오는 중"],
+      ["/index.html", "gba:request-save"],
       ["/data/loader.js", "EJS_player"],
       ["/data/compression/extract7z.js", "Module"],
       ["/data/cores/mgba-wasm.data", null]

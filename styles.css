@@ -32,6 +32,14 @@
   white-space: nowrap;
 }
 
+.gba-player-save-location {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 0.72em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .gba-player-empty {
   display: flex;
   flex: 1;

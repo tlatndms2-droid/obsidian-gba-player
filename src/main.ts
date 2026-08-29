@@ -1,13 +1,16 @@
-import { App, ItemView, Modal, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { App, ItemView, Modal, Notice, Plugin, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { BUNDLED_EMULATOR_ASSETS } from "./generated-vendor";
 
 const VIEW_TYPE_GBA_PLAYER = "gba-player-view";
 const SUPPORTED_ROM_EXTENSIONS = new Set(["gb", "gbc", "gba"]);
+const SAVE_FOLDER = "GBA Saves";
 
 interface SelectedRom {
   name: string;
   displayName: string;
+  savePath: string;
 }
 
 export default class GbaPlayerPlugin extends Plugin {
@@ -125,8 +128,12 @@ class GbaPlayerView extends ItemView {
   private frame: HTMLIFrameElement | null = null;
   private selectedRom: SelectedRom | null = null;
   private selectedRomBytes: ArrayBuffer | null = null;
+  private selectedSaveBytes: ArrayBuffer | null = null;
   private statusEl: HTMLElement | null = null;
   private loadingNoticeTimer: number | null = null;
+  private autoSaveTimer: number | null = null;
+  private pendingSave: { resolve: () => void; timeout: number } | null = null;
+  private emulatorMenuVisible = false;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: GbaPlayerPlugin) {
     super(leaf);
@@ -154,9 +161,12 @@ class GbaPlayerView extends ItemView {
 
   async onClose(): Promise<void> {
     this.clearLoadingNoticeTimer();
+    this.stopAutoSave();
+    await this.requestSave();
     this.frame?.remove();
     this.frame = null;
     this.selectedRomBytes = null;
+    this.selectedSaveBytes = null;
   }
 
   private renderEmptyState(): void {
@@ -188,9 +198,7 @@ class GbaPlayerView extends ItemView {
 
   private async loadVaultRom(file: TFile): Promise<void> {
     try {
-      this.selectedRom = { name: file.name, displayName: file.basename };
-      this.selectedRomBytes = await this.app.vault.adapter.readBinary(file.path);
-      this.renderPlayer();
+      await this.selectRom(file.name, file.basename, await this.app.vault.adapter.readBinary(file.path));
     } catch (error) {
       console.error("게임 파일을 읽지 못했습니다.", error);
       new Notice("게임 파일을 읽지 못했습니다. Vault 안의 .gb, .gbc, .gba 파일인지 확인해 주세요.");
@@ -220,13 +228,25 @@ class GbaPlayerView extends ItemView {
     }
 
     try {
-      this.selectedRom = { name: file.name, displayName: file.name.replace(/\.[^.]+$/, "") };
-      this.selectedRomBytes = await file.arrayBuffer();
-      this.renderPlayer();
+      await this.selectRom(file.name, file.name.replace(/\.[^.]+$/, ""), await file.arrayBuffer());
     } catch (error) {
       console.error("PC의 게임 파일을 읽지 못했습니다.", error);
       new Notice("선택한 게임 파일을 읽지 못했습니다.");
     }
+  }
+
+  private async selectRom(name: string, displayName: string, romBytes: ArrayBuffer): Promise<void> {
+    await this.requestSave();
+    this.stopAutoSave();
+
+    const romHash = createHash("sha256").update(Buffer.from(romBytes)).digest("hex").slice(0, 16);
+    const savePath = `${SAVE_FOLDER}/${sanitizeFileName(displayName)}-${romHash}.srm`;
+    const existingSave = this.app.vault.getAbstractFileByPath(savePath);
+
+    this.selectedRom = { name, displayName, savePath };
+    this.selectedRomBytes = romBytes;
+    this.selectedSaveBytes = existingSave instanceof TFile ? await this.app.vault.readBinary(existingSave) : null;
+    this.renderPlayer();
   }
 
   private renderPlayer(): void {
@@ -242,10 +262,18 @@ class GbaPlayerView extends ItemView {
     const titleGroup = header.createDiv({ cls: "gba-player-title-group" });
     titleGroup.createDiv({ text: "GBA 플레이어", cls: "gba-player-title" });
     titleGroup.createDiv({ text: this.selectedRom.displayName, cls: "gba-player-rom-name" });
+    titleGroup.createDiv({ text: `자동 저장: ${this.selectedRom.savePath}`, cls: "gba-player-save-location" });
+    const settingsButton = header.createEl("button", { text: "설정 열기" });
+    settingsButton.addEventListener("click", () => {
+      this.emulatorMenuVisible = !this.emulatorMenuVisible;
+      settingsButton.setText(this.emulatorMenuVisible ? "설정 닫기" : "설정 열기");
+      this.frame?.contentWindow?.postMessage({ type: "gba:toggle-settings", visible: this.emulatorMenuVisible }, "*");
+    });
     const changeButton = header.createEl("button", { text: "게임 변경" });
     changeButton.addEventListener("click", () => this.openRomSourcePicker());
 
     this.clearLoadingNoticeTimer();
+    this.emulatorMenuVisible = false;
     this.statusEl = contentEl.createDiv({ text: "에뮬레이터를 준비하는 중…", cls: "gba-player-status" });
 
     this.frame = contentEl.createEl("iframe", {
@@ -274,10 +302,12 @@ class GbaPlayerView extends ItemView {
         type: "gba:load-rom",
         name: this.selectedRom.name,
         bytes: this.selectedRomBytes,
+        saveBytes: this.selectedSaveBytes,
         loaderUrl: this.emulatorLoaderUrl,
         dataUrl: this.emulatorDataUrl
-      }, "*", [this.selectedRomBytes]);
+      }, "*", this.selectedSaveBytes ? [this.selectedRomBytes, this.selectedSaveBytes] : [this.selectedRomBytes]);
       this.selectedRomBytes = null;
+      this.selectedSaveBytes = null;
       return;
     }
 
@@ -285,6 +315,23 @@ class GbaPlayerView extends ItemView {
       this.clearLoadingNoticeTimer();
       this.statusEl?.remove();
       this.statusEl = null;
+      this.startAutoSave();
+      return;
+    }
+
+    if (event.data.type === "gba:save-data") {
+      if (event.data.bytes instanceof ArrayBuffer) {
+        void this.writeSave(event.data.bytes)
+          .catch((error) => console.error("게임 저장 파일을 Vault에 쓰지 못했습니다.", error))
+          .finally(() => this.finishPendingSave());
+      } else {
+        this.finishPendingSave();
+      }
+      return;
+    }
+
+    if (event.data.type === "gba:no-save") {
+      this.finishPendingSave();
       return;
     }
 
@@ -299,6 +346,56 @@ class GbaPlayerView extends ItemView {
       window.clearTimeout(this.loadingNoticeTimer);
       this.loadingNoticeTimer = null;
     }
+  }
+
+  private startAutoSave(): void {
+    this.stopAutoSave();
+    this.autoSaveTimer = window.setInterval(() => void this.requestSave(), 15_000);
+  }
+
+  private stopAutoSave(): void {
+    if (this.autoSaveTimer !== null) {
+      window.clearInterval(this.autoSaveTimer);
+      this.autoSaveTimer = null;
+    }
+  }
+
+  private requestSave(): Promise<void> {
+    if (!this.frame?.contentWindow || !this.selectedRom || this.pendingSave) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(() => this.finishPendingSave(), 3_000);
+      this.pendingSave = { resolve, timeout };
+      this.frame?.contentWindow?.postMessage({ type: "gba:request-save" }, "*");
+    });
+  }
+
+  private finishPendingSave(): void {
+    if (!this.pendingSave) return;
+    window.clearTimeout(this.pendingSave.timeout);
+    const { resolve } = this.pendingSave;
+    this.pendingSave = null;
+    resolve();
+  }
+
+  private async writeSave(bytes: ArrayBuffer): Promise<void> {
+    if (!this.selectedRom || bytes.byteLength === 0) return;
+
+    const existingSave = this.app.vault.getAbstractFileByPath(this.selectedRom.savePath);
+    if (existingSave instanceof TFile) {
+      await this.app.vault.modifyBinary(existingSave, bytes);
+      return;
+    }
+
+    const saveFolder = this.app.vault.getAbstractFileByPath(SAVE_FOLDER);
+    if (!saveFolder) {
+      await this.app.vault.createFolder(SAVE_FOLDER);
+    } else if (!(saveFolder instanceof TFolder)) {
+      throw new Error(`${SAVE_FOLDER} 경로가 폴더가 아닙니다.`);
+    }
+    await this.app.vault.createBinary(this.selectedRom.savePath, bytes);
   }
 }
 
@@ -361,7 +458,15 @@ class RomSourceModal extends Modal {
   }
 }
 
-function isFrameMessage(value: unknown): value is { type: "gba:ready" | "gba:started" | "gba:error"; message?: string } {
+function sanitizeFileName(value: string): string {
+  return value.replace(/[\\/:*?"<>|]/g, "_").trim() || "game";
+}
+
+function isFrameMessage(value: unknown): value is {
+  type: "gba:ready" | "gba:started" | "gba:error" | "gba:save-data" | "gba:no-save";
+  message?: string;
+  bytes?: unknown;
+} {
   return typeof value === "object" && value !== null && "type" in value && typeof (value as { type?: unknown }).type === "string";
 }
 
