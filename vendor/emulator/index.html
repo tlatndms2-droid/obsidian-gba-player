@@ -61,6 +61,7 @@
 
           romLoadingStarted = true;
           initialSaveBytes = payload.saveBytes instanceof ArrayBuffer ? payload.saveBytes : null;
+          const emulatorSettings = payload.emulatorSettings && typeof payload.emulatorSettings === "object" ? payload.emulatorSettings : {};
           romUrl = URL.createObjectURL(new Blob([payload.bytes], { type: "application/octet-stream" }));
           window.EJS_player = "#game";
           window.EJS_core = "gba";
@@ -68,9 +69,12 @@
           window.EJS_gameName = payload.name;
           window.EJS_pathtodata = payload.dataUrl;
           window.EJS_disableAutoLang = false;
+          window.EJS_volume = typeof emulatorSettings.volume === "number" ? emulatorSettings.volume : 0.3;
+          window.EJS_defaultOptions = emulatorSettings.options && typeof emulatorSettings.options === "object" ? emulatorSettings.options : {};
           window.EJS_startOnLoaded = true;
           window.EJS_onGameStart = () => {
             restoreInitialSave();
+            beginSettingsSync();
             gameStarted = true;
             window.parent.postMessage({ type: "gba:started" }, "*");
           };
@@ -127,6 +131,31 @@
           } else {
             emulator.menu.close();
           }
+        }
+
+        function beginSettingsSync() {
+          const emulator = window.EJS_emulator;
+          if (!emulator || emulator.gbaSettingsSyncInstalled) return;
+
+          emulator.gbaSettingsSyncInstalled = true;
+          const originalSaveSettings = emulator.saveSettings.bind(emulator);
+          emulator.saveSettings = () => {
+            originalSaveSettings();
+            sendSettings();
+          };
+          sendSettings();
+        }
+
+        function sendSettings() {
+          const emulator = window.EJS_emulator;
+          if (!emulator) return;
+          const options = {};
+          if (emulator.settings && typeof emulator.settings === "object") {
+            for (const [key, value] of Object.entries(emulator.settings)) {
+              if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") options[key] = value;
+            }
+          }
+          window.parent.postMessage({ type: "gba:settings", settings: { volume: emulator.volume, options } }, "*");
         }
 
         window.addEventListener("beforeunload", () => { if (romUrl) URL.revokeObjectURL(romUrl); });

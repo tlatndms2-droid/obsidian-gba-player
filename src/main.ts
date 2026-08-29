@@ -6,6 +6,14 @@ import { BUNDLED_EMULATOR_ASSETS } from "./generated-vendor";
 const VIEW_TYPE_GBA_PLAYER = "gba-player-view";
 const SUPPORTED_ROM_EXTENSIONS = new Set(["gb", "gbc", "gba"]);
 const SAVE_FOLDER = "GBA Saves";
+const DEFAULT_EMULATOR_VOLUME = 0.3;
+
+type EmulatorOptionValue = string | number | boolean;
+
+interface PluginSettings {
+  volume: number;
+  options: Record<string, EmulatorOptionValue>;
+}
 
 interface SelectedRom {
   name: string;
@@ -16,8 +24,10 @@ interface SelectedRom {
 export default class GbaPlayerPlugin extends Plugin {
   private emulatorServer: Server | null = null;
   private emulatorServerUrl = "";
+  private emulatorSettings: PluginSettings = { volume: DEFAULT_EMULATOR_VOLUME, options: {} };
 
   async onload(): Promise<void> {
+    this.emulatorSettings = normalizePluginSettings(await this.loadData());
     try {
       this.emulatorServerUrl = await this.startEmulatorServer();
     } catch (error) {
@@ -56,6 +66,16 @@ export default class GbaPlayerPlugin extends Plugin {
     }
 
     return new URL(relativePath, `${this.emulatorServerUrl}/`).toString();
+  }
+
+  getEmulatorSettings(): PluginSettings {
+    return { volume: this.emulatorSettings.volume, options: { ...this.emulatorSettings.options } };
+  }
+
+  async updateEmulatorSettings(value: unknown): Promise<void> {
+    const next = normalizePluginSettings(value);
+    this.emulatorSettings = next;
+    await this.saveData(next);
   }
 
   private async startEmulatorServer(): Promise<string> {
@@ -303,6 +323,7 @@ class GbaPlayerView extends ItemView {
         name: this.selectedRom.name,
         bytes: this.selectedRomBytes,
         saveBytes: this.selectedSaveBytes,
+        emulatorSettings: this.plugin.getEmulatorSettings(),
         loaderUrl: this.emulatorLoaderUrl,
         dataUrl: this.emulatorDataUrl
       }, "*", this.selectedSaveBytes ? [this.selectedRomBytes, this.selectedSaveBytes] : [this.selectedRomBytes]);
@@ -332,6 +353,12 @@ class GbaPlayerView extends ItemView {
 
     if (event.data.type === "gba:no-save") {
       this.finishPendingSave();
+      return;
+    }
+
+    if (event.data.type === "gba:settings") {
+      void this.plugin.updateEmulatorSettings(event.data.settings)
+        .catch((error) => console.error("에뮬레이터 설정을 저장하지 못했습니다.", error));
       return;
     }
 
@@ -462,10 +489,31 @@ function sanitizeFileName(value: string): string {
   return value.replace(/[\\/:*?"<>|]/g, "_").trim() || "game";
 }
 
+function normalizePluginSettings(value: unknown): PluginSettings {
+  if (!value || typeof value !== "object") {
+    return { volume: DEFAULT_EMULATOR_VOLUME, options: {} };
+  }
+
+  const candidate = value as { volume?: unknown; options?: unknown };
+  const volume = typeof candidate.volume === "number" && Number.isFinite(candidate.volume)
+    ? Math.min(1, Math.max(0, candidate.volume))
+    : DEFAULT_EMULATOR_VOLUME;
+  const options: Record<string, EmulatorOptionValue> = {};
+  if (candidate.options && typeof candidate.options === "object") {
+    for (const [key, optionValue] of Object.entries(candidate.options)) {
+      if (typeof optionValue === "string" || typeof optionValue === "number" || typeof optionValue === "boolean") {
+        options[key] = optionValue;
+      }
+    }
+  }
+  return { volume, options };
+}
+
 function isFrameMessage(value: unknown): value is {
-  type: "gba:ready" | "gba:started" | "gba:error" | "gba:save-data" | "gba:no-save";
+  type: "gba:ready" | "gba:started" | "gba:error" | "gba:save-data" | "gba:no-save" | "gba:settings";
   message?: string;
   bytes?: unknown;
+  settings?: unknown;
 } {
   return typeof value === "object" && value !== null && "type" in value && typeof (value as { type?: unknown }).type === "string";
 }
